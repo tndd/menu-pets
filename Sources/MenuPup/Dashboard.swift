@@ -32,6 +32,7 @@ final class Dashboard: FlippedView {
         addSubview(settingsButton)
         gauges.forEach(addSubview)
         for surface in [batterySurface, terminalSurface] { addSubview(surface) }
+        batterySurface.solidBackground = true
         batterySurface.addSubview(battery)
         terminalSurface.addSubview(terminal)
         terminal.expandedChanged = { [weak self] expanded in

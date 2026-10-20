@@ -58,11 +58,14 @@ class FlippedView: NSView {
 
 final class Surface: FlippedView {
     var theme: Theme = .glass { didSet { needsDisplay = true } }
+    var solidBackground = false { didSet { needsDisplay = true } }
     override func draw(_ dirtyRect: NSRect) {
         let dark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
                                 xRadius: theme == .glass ? 8 : 4, yRadius: theme == .glass ? 8 : 4)
-        (dark ? NSColor.white.withAlphaComponent(0.035) : NSColor.white.withAlphaComponent(0.7)).setFill()
+        let fill = solidBackground ? (dark ? NSColor(calibratedWhite: 0.12, alpha: 1) : .white) :
+            (dark ? NSColor.white.withAlphaComponent(0.035) : NSColor.white.withAlphaComponent(0.7))
+        fill.setFill()
         path.fill()
         NSColor.separatorColor.withAlphaComponent(theme == .glass ? 0.25 : 0.45).setStroke()
         path.lineWidth = 0.5

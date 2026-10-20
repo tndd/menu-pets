@@ -143,9 +143,19 @@ final class UIChecks {
                 await wait(0.4)
                 let item = NSMenuItem()
                 item.tag = DisplayMode.monitor.rawValue; app.changeDisplay(item)
-                check("monitor_mode", app.statusItem.button?.image == nil && app.statusItem.button?.title.contains(" G") == true)
+                check("monitor_mode", app.statusItem.button?.image?.size == MenuReadout.size && app.statusItem.button?.image?.accessibilityDescription?.contains("GPU") == true)
                 item.tag = DisplayMode.petAndNumbers.rawValue; app.changeDisplay(item)
-                check("combined_mode", app.statusItem.button?.image != nil && app.statusItem.button?.title.contains(" C") == true)
+                check("combined_mode", (app.statusItem.button?.image?.size.width ?? 0) > MenuReadout.size.width && app.statusItem.button?.image?.accessibilityDescription?.contains("GPU") == true)
+                try menuReadoutPreview()
+                await wait(0.1)
+                if let button = app.statusItem.button,
+                   let bitmap = button.bitmapImageRepForCachingDisplay(in: button.bounds) {
+                    button.effectiveAppearance.performAsCurrentDrawingAppearance {
+                        button.cacheDisplay(in: button.bounds, to: bitmap)
+                    }
+                    try bitmap.representation(using: .png, properties: [:])?.write(
+                        to: directory.appendingPathComponent("combined-status.png"))
+                }
                 item.tag = DisplayMode.pet.rawValue; app.changeDisplay(item)
                 check("pet_mode", app.statusItem.button?.image != nil && app.statusItem.button?.title == "")
                 let success = results.values.allSatisfy { $0 }
@@ -160,6 +170,24 @@ final class UIChecks {
                 NSApp.terminate(nil)
             }
         }
+    }
+    @MainActor private func menuReadoutPreview() throws {
+        let preview = NSImage(size: NSSize(width: 240, height: 120), flipped: false) { _ in
+            for (index, dark) in [false, true].enumerated() {
+                (dark ? NSColor(calibratedWhite: 0.1, alpha: 1) : .white).setFill()
+                NSRect(x: 0, y: index * 60, width: 240, height: 60).fill()
+                MenuReadout.image(snapshot: self.app.latest, dark: dark).draw(in:
+                    NSRect(x: 10, y: index * 60 + 8, width: 228, height: 44))
+            }
+            return true
+        }
+        if let tiff = preview.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+           let png = bitmap.representation(using: .png, properties: [:]) {
+            try png.write(to: directory.appendingPathComponent("menu-readout.png"))
+        }
+        let unavailable = Snapshot()
+        check("unavailable_metrics_are_dashes", MenuReadout.summary(unavailable).contains("GPU —"))
+        check("readout_width_stays_fixed", MenuReadout.image(snapshot: unavailable, dark: false).size == MenuReadout.size)
     }
     @MainActor private func petPreview(_ kind: PetKind) throws {
         let frames = Pet.frames(for: kind)

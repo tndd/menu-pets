@@ -13,6 +13,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var sampleTimer: Timer?
     private var petTimer: Timer?
     private var resizeTimer: Timer?
+    private var appearanceObserver: NSKeyValueObservation?
+    private var statusFrames: [NSImage] = []
     private(set) var frameIndex = 0
     private(set) var animationFPS: Double = 0
     private var samplePending = false
@@ -41,6 +43,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         statusItem.button?.imagePosition = .imageLeft
         statusItem.button?.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
         statusItem.button?.setAccessibilityLabel("MenuPup システムモニター")
+        appearanceObserver = statusItem.button?.observe(\.effectiveAppearance, options: [.new]) { [weak self] _, _ in
+            self?.updateStatus()
+        }
         popover.behavior = .transient
         popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         popover.delegate = self
@@ -164,12 +169,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     func updateStatus() {
         let mode = preferences.displayMode
         let frames = Pet.frames(for: preferences.petKind)
-        statusItem.button?.image = mode == .monitor ? nil : frames[frameIndex % frames.count]
-        let cpu = latest.cpu.map { String(format: "%.0f", $0 * 100) } ?? "—"
-        let gpu = latest.gpu.map { String(format: "%.0f", $0 * 100) } ?? "—"
-        let memory = latest.memoryTotal > 0 ? String(format: "%.0f", Double(latest.memoryUsed) / Double(latest.memoryTotal) * 100) : "—"
-        statusItem.button?.title = mode == .pet ? "" : " C\(cpu) G\(gpu) M\(memory)%"
-        statusItem.button?.toolTip = "MenuPup · CPU \(cpu)% · GPU \(gpu)% · メモリ \(memory)%\nクリックで表示、右クリックで設定"
+        let dark = statusItem.button?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let metrics = MenuReadout.image(snapshot: latest, dark: dark)
+        switch mode {
+        case .pet: statusFrames = frames
+        case .petAndNumbers: statusFrames = frames.map { MenuReadout.combined(pet: $0, metrics: metrics) }
+        case .monitor: statusFrames = [metrics]
+        }
+        statusItem.button?.image = statusFrames[frameIndex % statusFrames.count]
+        statusItem.button?.title = ""
+        let summary = MenuReadout.summary(latest)
+        statusItem.button?.toolTip = "MenuPup · \(summary)\nクリックで表示、右クリックで設定"
+        statusItem.button?.setAccessibilityLabel("MenuPup · " + summary)
         configureAnimation()
     }
     private func configureAnimation() {
@@ -182,8 +193,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         petTimer = Timer.scheduledTimer(withTimeInterval: 1 / fps, repeats: true) { [weak self] _ in
             guard let self else { return }
             self.frameIndex += 1
-            let frames = Pet.frames(for: self.preferences.petKind)
-            self.statusItem.button?.image = frames[self.frameIndex % frames.count]
+            guard !self.statusFrames.isEmpty else { return }
+            self.statusItem.button?.image = self.statusFrames[self.frameIndex % self.statusFrames.count]
         }
         petTimer?.tolerance = 0.03
     }
