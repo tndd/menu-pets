@@ -146,6 +146,12 @@ final class UIChecks {
                 check("monitor_mode", app.statusItem.button?.image?.size == MenuReadout.size && app.statusItem.button?.image?.accessibilityDescription?.contains("GPU") == true)
                 item.tag = DisplayMode.petAndNumbers.rawValue; app.changeDisplay(item)
                 check("combined_mode", (app.statusItem.button?.image?.size.width ?? 0) > MenuReadout.size.width && app.statusItem.button?.image?.accessibilityDescription?.contains("GPU") == true)
+                await wait(0.1)
+                if let button = app.statusItem.button, let image = button.image {
+                    let rect = button.cell?.imageRect(forBounds: button.bounds) ?? .zero
+                    check("compact_status_padding", abs(button.bounds.width - image.size.width - 4) < 1)
+                    check("status_image_not_clipped", abs(rect.width - image.size.width) < 1 && rect.minX >= 0 && rect.maxX <= button.bounds.maxX)
+                }
                 try menuReadoutPreview()
                 await wait(0.1)
                 if let button = app.statusItem.button,
@@ -172,11 +178,14 @@ final class UIChecks {
         }
     }
     @MainActor private func menuReadoutPreview() throws {
-        let preview = NSImage(size: NSSize(width: 240, height: 120), flipped: false) { _ in
-            for (index, dark) in [false, true].enumerated() {
+        var full = Snapshot()
+        full.cpu = 1; full.gpu = 1; full.memoryUsed = 1; full.memoryTotal = 1
+        let samples = [app.latest, app.latest, full]
+        let preview = NSImage(size: NSSize(width: 240, height: 180), flipped: false) { _ in
+            for (index, dark) in [false, true, false].enumerated() {
                 (dark ? NSColor(calibratedWhite: 0.1, alpha: 1) : .white).setFill()
                 NSRect(x: 0, y: index * 60, width: 240, height: 60).fill()
-                MenuReadout.image(snapshot: self.app.latest, dark: dark).draw(in:
+                MenuReadout.image(snapshot: samples[index], dark: dark).draw(in:
                     NSRect(x: 10, y: index * 60 + 8, width: 228, height: 44))
             }
             return true
