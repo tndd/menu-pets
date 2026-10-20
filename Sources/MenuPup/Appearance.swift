@@ -19,6 +19,10 @@ final class Preferences {
         get { DisplayMode(rawValue: defaults.integer(forKey: "displayMode")) ?? .pet }
         set { defaults.set(newValue.rawValue, forKey: "displayMode") }
     }
+    var petKind: PetKind {
+        get { PetKind(rawValue: defaults.string(forKey: "petKind") ?? "") ?? .classic }
+        set { defaults.set(newValue.rawValue, forKey: "petKind") }
+    }
     var animation: Bool {
         get { defaults.object(forKey: "animation") as? Bool ?? true }
         set { defaults.set(newValue, forKey: "animation") }

@@ -163,7 +163,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
     func updateStatus() {
         let mode = preferences.displayMode
-        statusItem.button?.image = mode == .monitor ? nil : Pet.frames[frameIndex % Pet.frames.count]
+        let frames = Pet.frames(for: preferences.petKind)
+        statusItem.button?.image = mode == .monitor ? nil : frames[frameIndex % frames.count]
         let cpu = latest.cpu.map { String(format: "%.0f", $0 * 100) } ?? "—"
         let gpu = latest.gpu.map { String(format: "%.0f", $0 * 100) } ?? "—"
         let memory = latest.memoryTotal > 0 ? String(format: "%.0f", Double(latest.memoryUsed) / Double(latest.memoryTotal) * 100) : "—"
@@ -181,7 +182,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         petTimer = Timer.scheduledTimer(withTimeInterval: 1 / fps, repeats: true) { [weak self] _ in
             guard let self else { return }
             self.frameIndex += 1
-            self.statusItem.button?.image = Pet.frames[self.frameIndex % Pet.frames.count]
+            let frames = Pet.frames(for: self.preferences.petKind)
+            self.statusItem.button?.image = frames[self.frameIndex % frames.count]
         }
         petTimer?.tolerance = 0.03
     }
@@ -192,6 +194,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             item.target = self; item.tag = index; item.state = preferences.displayMode.rawValue == index ? .on : .off
         }
         menu.addItem(.separator())
+        let characters = NSMenu(title: "キャラクター")
+        for kind in PetKind.allCases {
+            let item = characters.addItem(withTitle: kind.title, action: #selector(changePet(_:)), keyEquivalent: "")
+            item.target = self; item.representedObject = kind.rawValue
+            item.image = Pet.frames(for: kind).first
+            item.state = preferences.petKind == kind ? .on : .off
+        }
+        let charactersItem = menu.addItem(withTitle: "キャラクター", action: nil, keyEquivalent: "")
+        charactersItem.submenu = characters
         let animation = menu.addItem(withTitle: "犬のアニメーション", action: #selector(toggleAnimation), keyEquivalent: "")
         animation.target = self; animation.state = preferences.animation ? .on : .off
         let themes = NSMenu(title: "テーマ")
@@ -225,6 +236,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
     @objc func changeDisplay(_ sender: NSMenuItem) {
         preferences.displayMode = DisplayMode(rawValue: sender.tag) ?? .pet
+        updateStatus()
+    }
+    @objc func changePet(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let kind = PetKind(rawValue: raw) else { return }
+        preferences.petKind = kind
+        frameIndex = 0
         updateStatus()
     }
     @objc private func toggleAnimation() { preferences.animation.toggle(); updateStatus() }

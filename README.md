@@ -16,6 +16,7 @@ open build/MenuPup.app
 ## 操作
 
 - 犬をクリック：パネルの開閉。右クリック：表示モード・設定・終了。
+- 歯車の「キャラクター」でA · Classic（ずんぐり）／B · Low Run（横長）を切り替え。選択は保存され、次回起動にも引き継がれます。
 - 歯車の「テーマ」からGlass / Material、「外観」からシステム / ライト / ダークを選択できます。
 - 3つのメーター：CPU（青）・GPU（紫）・メモリ（オレンジ）。
 - バッテリー：過去24時間の残量を15分の区間ごとに表示。薄い格子、充電中の印付き。空白は未計測です。
@@ -61,4 +62,6 @@ open -n build/MenuPup.app --args --ui-checks "$PWD/outputs/ui"
 
 ## キャラクター
 
-Annoying DogはUNDERTALEのキャラクター（Toby Fox）です。[公式ページ](https://undertale.com/alarmclock/)の姿を参考に、メニューバー用の16×12ドット（1ドット1.5pt）と4枚の走行フレームをコードで描いています。原作のスプライトそのものを同梱したものではありません。
+Annoying DogはUNDERTALEのキャラクター（Toby Fox）です。[公式ページ](https://undertale.com/alarmclock/)と選定した生成案をもとに、A · Classic／B · Low Runの透過PNGを同梱しています。各4フレーム。高さ22ptの枠で比率を保ち、BはAより横幅を広く取ります。CPU負荷に応じて2〜10fpsで走ります。原作のスプライトそのものを同梱したものではありません。
+
+生成画像は比較用の検証画像ではなくアプリが実行時に読む素材のため、`Sources/MenuPup/Resources/Pets/`でGit管理しています。生成方法とプロンプトは[docs/pet-assets.md](docs/pet-assets.md)を参照してください。

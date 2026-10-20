@@ -8,6 +8,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$(swift build -c release --show-bin-path)/MenuPup" "$APP/Contents/MacOS/MenuPup"
 # SwiftTerm explicitly probes the app's Contents/Resources when packaged.
 cp -R "$(swift build -c release --show-bin-path)/SwiftTerm_SwiftTerm.bundle" "$APP/Contents/Resources/"
+cp -R "$(swift build -c release --show-bin-path)/MenuPup_MenuPup.bundle" "$APP/Contents/Resources/"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

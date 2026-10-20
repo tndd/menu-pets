@@ -26,16 +26,34 @@ final class UIChecks {
                 app.preferences.apply(); app.dashboard.applyTheme()
                 await wait(0.3)
                 try screenshot("glass-collapsed.png")
-                let dog = NSImage(size: NSSize(width: 104, height: 22), flipped: false) { _ in
-                    for (index, frame) in Pet.frames.enumerated() {
-                        frame.draw(in: NSRect(x: index * 26, y: 0, width: 26, height: 22))
+                for kind in PetKind.allCases {
+                    choose("キャラクター", kind.title)
+                    let frames = Pet.frames(for: kind)
+                    check("character_\(kind.rawValue)_selected", app.preferences.petKind == kind &&
+                          app.statusItem.button?.image?.accessibilityDescription == kind.title)
+                    check("character_\(kind.rawValue)_persisted", Preferences(defaults: app.preferences.defaults).petKind == kind)
+                    check("character_\(kind.rawValue)_four_frames", Set(frames.compactMap { $0.tiffRepresentation }).count == 4)
+                    check("character_\(kind.rawValue)_checked", app.settingsMenu().item(withTitle: "キャラクター")?
+                        .submenu?.item(withTitle: kind.title)?.state == .on)
+                    try petPreview(kind)
+                    await wait(0.1)
+                    if let button = app.statusItem.button,
+                       let bitmap = button.bitmapImageRepForCachingDisplay(in: button.bounds) {
+                        button.effectiveAppearance.performAsCurrentDrawingAppearance {
+                            button.cacheDisplay(in: button.bounds, to: bitmap)
+                        }
+                        try bitmap.representation(using: .png, properties: [:])?.write(
+                            to: directory.appendingPathComponent("\(kind.assetName)-status.png"))
                     }
-                    return true
+                    if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                        app.preferences.animation = true; app.preferences.displayMode = .pet; app.updateStatus()
+                        let initial = app.frameIndex
+                        await wait(1.1)
+                        check("character_\(kind.rawValue)_animates", app.frameIndex > initial)
+                    }
                 }
-                if let tiff = dog.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
-                   let png = bitmap.representation(using: .png, properties: [:]) {
-                    try png.write(to: directory.appendingPathComponent("dog-frames.png"))
-                }
+                check("characters_have_distinct_shapes", Pet.frames(for: .lowRun)[0].size.width > Pet.frames(for: .classic)[0].size.width)
+                choose("キャラクター", PetKind.classic.title)
                 choose("テーマ", "Material")
                 choose("外観", "ライト")
                 await wait(0.3)
@@ -45,7 +63,6 @@ final class UIChecks {
                 choose("外観", "ダーク")
                 check("settings_theme_and_dark", app.preferences.theme == .glass && app.preferences.dark)
                 check("load_controls_pace", Pet.framesPerSecond(cpu: 0) == 2 && Pet.framesPerSecond(cpu: 1) == 10)
-                check("four_distinct_dog_frames", Set(Pet.frames.compactMap { $0.tiffRepresentation }).count == 4)
                 if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                     app.preferences.animation = true; app.preferences.displayMode = .pet; app.updateStatus()
                     let initialFrame = app.frameIndex
@@ -142,6 +159,28 @@ final class UIChecks {
                 print(message)
                 NSApp.terminate(nil)
             }
+        }
+    }
+    @MainActor private func petPreview(_ kind: PetKind) throws {
+        let frames = Pet.frames(for: kind)
+        // Render the actual runtime frames at 1x and enlarged on both menu-bar appearances.
+        let preview = NSImage(size: NSSize(width: 400, height: 180), flipped: false) { _ in
+            for (row, background) in [NSColor(calibratedWhite: 0.12, alpha: 1), .white].enumerated() {
+                background.setFill()
+                NSRect(x: 0, y: row * 90, width: 400, height: 90).fill()
+                for (index, frame) in frames.enumerated() {
+                    NSGraphicsContext.current?.imageInterpolation = .none
+                    frame.draw(in: NSRect(x: CGFloat(index * 100 + 5), y: CGFloat(row * 90 + 4),
+                        width: frame.size.width, height: frame.size.height))
+                    frame.draw(in: NSRect(x: CGFloat(index * 100 + 5), y: CGFloat(row * 90 + 29),
+                        width: frame.size.width * 2, height: frame.size.height * 2))
+                }
+            }
+            return true
+        }
+        if let tiff = preview.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
+           let png = bitmap.representation(using: .png, properties: [:]) {
+            try png.write(to: directory.appendingPathComponent("\(kind.assetName)-preview.png"))
         }
     }
     @MainActor private func choose(_ group: String, _ title: String) {

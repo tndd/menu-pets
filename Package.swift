@@ -14,7 +14,7 @@ let package = Package(
                 linkerSettings: [.linkedFramework("IOKit")]),
         .executableTarget(name: "MenuPup", dependencies: [
             "MonitorCore", "CMetrics", .product(name: "SwiftTerm", package: "SwiftTerm")
-        ]),
+        ], resources: [.copy("Resources/Pets")]),
         .executableTarget(name: "MonitorChecks", dependencies: ["MonitorCore"], path: "Tests/MonitorCoreTests")
     ],
     swiftLanguageModes: [.v5]
