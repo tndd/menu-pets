@@ -1,0 +1,212 @@
+import AppKit
+import MonitorCore
+
+final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+    let preferences: Preferences
+    let dashboard: Dashboard
+    let popover = NSPopover()
+    private(set) var statusItem: NSStatusItem!
+    private(set) var latest = Snapshot()
+    let history: BatteryHistory
+    private let sampler = Sampler()
+    private let queue = DispatchQueue(label: "MenuPup.telemetry", qos: .utility)
+    private var sampleTimer: Timer?
+    private var petTimer: Timer?
+    private(set) var frameIndex = 0
+    private(set) var animationFPS: Double = 0
+    private var samplePending = false
+    private var active = true
+    private var workspaceObservers: [NSObjectProtocol] = []
+    let checkDirectory: URL?
+    var checks: UIChecks?
+
+    init(checkDirectory: URL? = nil) {
+        self.checkDirectory = checkDirectory
+        let defaults = checkDirectory == nil ? UserDefaults.standard : UserDefaults(suiteName: "MenuPup.UIChecks")!
+        preferences = Preferences(defaults: defaults)
+        let directory = checkDirectory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("MenuPup")
+        history = BatteryHistory(url: directory.appendingPathComponent("battery.json"))
+        dashboard = Dashboard(preferences: preferences)
+        super.init()
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        preferences.apply()
+        installMainMenu()
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem.button?.target = self; statusItem.button?.action = #selector(statusClicked)
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        statusItem.button?.imagePosition = .imageLeft
+        statusItem.button?.font = .monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+        statusItem.button?.setAccessibilityLabel("MenuPup システムモニター")
+        popover.behavior = .transient
+        popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        popover.delegate = self
+        let controller = NSViewController(); controller.view = dashboard
+        popover.contentViewController = controller
+        popover.contentSize = NSSize(width: Dashboard.width, height: Dashboard.collapsedHeight)
+        dashboard.onResize = { [weak self] height in
+            self?.popover.contentSize = NSSize(width: Dashboard.width, height: height)
+            self?.dashboard.frame.size = NSSize(width: Dashboard.width, height: height)
+            self?.dashboard.layoutSubtreeIfNeeded()
+        }
+        dashboard.onSettings = { [weak self] in self?.showSettings() }
+        dashboard.applyTheme()
+        updateStatus()
+        startSampling()
+        let center = NSWorkspace.shared.notificationCenter
+        workspaceObservers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.active = false; self?.sampleTimer?.invalidate(); self?.petTimer?.invalidate()
+        })
+        workspaceObservers.append(center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.active = true; self?.startSampling()
+        })
+        workspaceObservers.append(center.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.configureAnimation()
+        })
+        if let directory = checkDirectory {
+            checks = UIChecks(app: self, directory: directory)
+            checks?.start()
+        }
+    }
+
+    private func installMainMenu() {
+        let main = NSMenu()
+        let appItem = NSMenuItem(); let app = NSMenu()
+        app.addItem(withTitle: "MenuPupを終了", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = app; main.addItem(appItem)
+        let editItem = NSMenuItem(); let edit = NSMenu(title: "編集")
+        edit.addItem(withTitle: "取り消す", action: Selector(("undo:")), keyEquivalent: "z")
+        edit.addItem(withTitle: "カット", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "コピー", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "ペースト", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "すべて選択", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = edit; main.addItem(editItem)
+        NSApp.mainMenu = main
+    }
+
+    func startSampling() {
+        sampleTimer?.invalidate()
+        sampleTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refresh() }
+        sampleTimer?.tolerance = 0.2
+        refresh()
+    }
+    func refresh() {
+        guard active, !samplePending else { return }
+        samplePending = true
+        queue.async { [weak self] in
+            guard let self else { return }
+            let snapshot = self.sampler.sample()
+            DispatchQueue.main.async {
+                self.samplePending = false
+                self.latest = snapshot
+                if let battery = snapshot.battery {
+                    self.history.record(BatterySample(date: snapshot.date, level: battery.level, charging: battery.charging))
+                }
+                if self.popover.isShown { self.dashboard.update(snapshot: snapshot, history: self.history) }
+                self.updateStatus()
+            }
+        }
+    }
+    @objc func statusClicked() {
+        if NSApp.currentEvent?.type == .rightMouseUp { showSettings(); return }
+        if popover.isShown { popover.performClose(nil); return }
+        guard let button = statusItem.button else { return }
+        dashboard.terminal.reset()
+        dashboard.applyTheme()
+        dashboard.update(snapshot: latest, history: history)
+        NSApp.activate(ignoringOtherApps: true)
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        dashboard.window?.makeKey()
+        dashboard.window?.makeFirstResponder(dashboard.terminal.input)
+        refresh()
+    }
+    func popoverDidClose(_ notification: Notification) {
+        dashboard.terminal.reset()
+    }
+    func updateStatus() {
+        let mode = preferences.displayMode
+        statusItem.button?.image = mode == .monitor ? nil : Pet.frames[frameIndex % Pet.frames.count]
+        let cpu = latest.cpu.map { String(format: "%.0f", $0 * 100) } ?? "—"
+        let gpu = latest.gpu.map { String(format: "%.0f", $0 * 100) } ?? "—"
+        let memory = latest.memoryTotal > 0 ? String(format: "%.0f", Double(latest.memoryUsed) / Double(latest.memoryTotal) * 100) : "—"
+        statusItem.button?.title = mode == .pet ? "" : " C\(cpu) G\(gpu) M\(memory)%"
+        statusItem.button?.toolTip = "MenuPup · CPU \(cpu)% · GPU \(gpu)% · メモリ \(memory)%\nクリックで表示、右クリックで設定"
+        configureAnimation()
+    }
+    private func configureAnimation() {
+        petTimer?.invalidate()
+        animationFPS = 0
+        guard active, preferences.animation, preferences.displayMode != .monitor,
+              !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        let fps = Pet.framesPerSecond(cpu: latest.cpu)
+        animationFPS = fps
+        petTimer = Timer.scheduledTimer(withTimeInterval: 1 / fps, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.frameIndex = (self.frameIndex + 1) % Pet.frames.count
+            self.statusItem.button?.image = Pet.frames[self.frameIndex]
+        }
+        petTimer?.tolerance = 0.03
+    }
+    func settingsMenu() -> NSMenu {
+        let menu = NSMenu()
+        for (index, title) in ["ペット", "ペット＋数値", "数値のみ"].enumerated() {
+            let item = menu.addItem(withTitle: title, action: #selector(changeDisplay(_:)), keyEquivalent: "")
+            item.target = self; item.tag = index; item.state = preferences.displayMode.rawValue == index ? .on : .off
+        }
+        menu.addItem(.separator())
+        let animation = menu.addItem(withTitle: "犬のアニメーション", action: #selector(toggleAnimation), keyEquivalent: "")
+        animation.target = self; animation.state = preferences.animation ? .on : .off
+        let themes = NSMenu(title: "テーマ")
+        for (index, title) in ["Glass", "Material"].enumerated() {
+            let item = themes.addItem(withTitle: title, action: #selector(changeTheme(_:)), keyEquivalent: "")
+            item.target = self; item.tag = index
+            item.state = (preferences.theme == .glass ? 0 : 1) == index ? .on : .off
+        }
+        let themeItem = menu.addItem(withTitle: "テーマ", action: nil, keyEquivalent: "")
+        themeItem.submenu = themes
+        let appearances = NSMenu(title: "外観")
+        for (index, title) in ["システム", "ライト", "ダーク"].enumerated() {
+            let item = appearances.addItem(withTitle: title, action: #selector(changeAppearance(_:)), keyEquivalent: "")
+            item.target = self; item.tag = index
+            item.state = preferences.colorMode.rawValue == index ? .on : .off
+        }
+        let appearanceItem = menu.addItem(withTitle: "外観", action: nil, keyEquivalent: "")
+        appearanceItem.submenu = appearances
+        menu.addItem(.separator())
+        let quit = menu.addItem(withTitle: "MenuPupを終了", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        quit.target = NSApp
+        return menu
+    }
+    func showSettings() {
+        let menu = settingsMenu()
+        if popover.isShown {
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: dashboard.settingsButton.bounds.maxY), in: dashboard.settingsButton)
+        } else if let button = statusItem.button {
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY), in: button)
+        }
+    }
+    @objc func changeDisplay(_ sender: NSMenuItem) {
+        preferences.displayMode = DisplayMode(rawValue: sender.tag) ?? .pet
+        updateStatus()
+    }
+    @objc private func toggleAnimation() { preferences.animation.toggle(); updateStatus() }
+    @objc func changeTheme(_ sender: NSMenuItem) {
+        preferences.theme = sender.tag == 0 ? .glass : .material
+        dashboard.applyTheme()
+    }
+    @objc func changeAppearance(_ sender: NSMenuItem) {
+        preferences.colorMode = ColorMode(rawValue: sender.tag) ?? .automatic
+        preferences.apply(); dashboard.applyTheme()
+    }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        dashboard.terminal.reset(force: true)
+        return .terminateNow
+    }
+    func applicationWillTerminate(_ notification: Notification) {
+        active = false
+        sampleTimer?.invalidate(); petTimer?.invalidate()
+        workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
+    }
+}
