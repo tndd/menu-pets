@@ -12,6 +12,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let queue = DispatchQueue(label: "MenuPup.telemetry", qos: .utility)
     private var sampleTimer: Timer?
     private var petTimer: Timer?
+    private var resizeTimer: Timer?
     private(set) var frameIndex = 0
     private(set) var animationFPS: Double = 0
     private var samplePending = false
@@ -46,11 +47,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let controller = NSViewController(); controller.view = dashboard
         popover.contentViewController = controller
         popover.contentSize = NSSize(width: Dashboard.width, height: Dashboard.collapsedHeight)
-        dashboard.onResize = { [weak self] height in
-            self?.popover.contentSize = NSSize(width: Dashboard.width, height: height)
-            self?.dashboard.frame.size = NSSize(width: Dashboard.width, height: height)
-            self?.dashboard.layoutSubtreeIfNeeded()
-        }
+        dashboard.onResize = { [weak self] size in self?.resizePopover(to: size) }
         dashboard.onSettings = { [weak self] in self?.showSettings() }
         dashboard.applyTheme()
         updateStatus()
@@ -69,6 +66,42 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             checks = UIChecks(app: self, directory: directory)
             checks?.start()
         }
+    }
+
+    private func resizePopover(to requestedSize: NSSize) {
+        resizeTimer?.invalidate()
+        resizeTimer = nil
+        let visible = statusItem?.button?.window?.screen?.visibleFrame.size
+        let target = NSSize(width: min(requestedSize.width, (visible?.width ?? 1000) - 32),
+                            height: min(requestedSize.height, (visible?.height ?? 1000) - 32))
+        let apply: (NSSize) -> Void = { [weak self] size in
+            guard let self else { return }
+            self.popover.contentSize = size
+            self.dashboard.frame.size = size
+            self.dashboard.needsLayout = true
+            self.dashboard.layoutSubtreeIfNeeded()
+        }
+        guard popover.isShown, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            apply(target); dashboard.terminal.expansionDidFinish(); return
+        }
+        let initial = popover.contentSize
+        guard initial != target else { apply(target); dashboard.terminal.expansionDidFinish(); return }
+        let started = ProcessInfo.processInfo.systemUptime
+        // Resize the native popover so AppKit retains its arrow and screen-edge placement.
+        let timer = Timer(timeInterval: 1 / 60, repeats: true) { [weak self] timer in
+            guard let self else { timer.invalidate(); return }
+            let progress = min(1, (ProcessInfo.processInfo.systemUptime - started) / 0.18)
+            let eased = 1 - pow(1 - progress, 3)
+            apply(NSSize(width: initial.width + (target.width - initial.width) * eased,
+                         height: initial.height + (target.height - initial.height) * eased))
+            if progress >= 1 {
+                timer.invalidate()
+                self.resizeTimer = nil
+                self.dashboard.terminal.expansionDidFinish()
+            }
+        }
+        resizeTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     private func installMainMenu() {
@@ -122,6 +155,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         dashboard.window?.makeFirstResponder(dashboard.terminal.input)
         refresh()
     }
+    func popoverWillClose(_ notification: Notification) {
+        dashboard.terminal.reset()
+    }
     func popoverDidClose(_ notification: Notification) {
         dashboard.terminal.reset()
     }
@@ -144,8 +180,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         animationFPS = fps
         petTimer = Timer.scheduledTimer(withTimeInterval: 1 / fps, repeats: true) { [weak self] _ in
             guard let self else { return }
-            self.frameIndex = (self.frameIndex + 1) % Pet.frames.count
-            self.statusItem.button?.image = Pet.frames[self.frameIndex]
+            self.frameIndex += 1
+            self.statusItem.button?.image = Pet.frames[self.frameIndex % Pet.frames.count]
         }
         petTimer?.tolerance = 0.03
     }
@@ -206,7 +242,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
     func applicationWillTerminate(_ notification: Notification) {
         active = false
-        sampleTimer?.invalidate(); petTimer?.invalidate()
+        sampleTimer?.invalidate(); petTimer?.invalidate(); resizeTimer?.invalidate()
         workspaceObservers.forEach { NSWorkspace.shared.notificationCenter.removeObserver($0) }
     }
 }

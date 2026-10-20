@@ -4,6 +4,7 @@ import MonitorCore
 final class Dashboard: FlippedView {
     static let width: CGFloat = 256
     static let collapsedHeight: CGFloat = 302
+    static let expandedSize = NSSize(width: 520, height: 464)
     let preferences: Preferences
     let settingsButton = NSButton()
     private let titleLabel = NSTextField(labelWithString: "MenuPup")
@@ -14,7 +15,7 @@ final class Dashboard: FlippedView {
     private let effect = NSVisualEffectView()
     private let batterySurface = Surface()
     private let terminalSurface = Surface()
-    var onResize: ((CGFloat) -> Void)?
+    var onResize: ((NSSize) -> Void)?
     var onSettings: (() -> Void)?
     var expanded = false
 
@@ -36,7 +37,7 @@ final class Dashboard: FlippedView {
         terminal.expandedChanged = { [weak self] expanded in
             guard let self else { return }
             self.expanded = expanded
-            self.onResize?(Self.collapsedHeight + (expanded ? 162 : 0))
+            self.onResize?(expanded ? Self.expandedSize : NSSize(width: Self.width, height: Self.collapsedHeight))
             self.needsLayout = true
         }
         applyTheme()
@@ -48,10 +49,10 @@ final class Dashboard: FlippedView {
         titleLabel.frame = NSRect(x: 12, y: 12, width: 90, height: 14)
         settingsButton.frame = NSRect(x: bounds.width - 30, y: 7, width: 22, height: 22)
         for (i, gauge) in gauges.enumerated() {
-            gauge.frame = NSRect(x: 8 + CGFloat(i) * 80, y: 34, width: 80, height: 84)
+            gauge.frame = NSRect(x: (bounds.width - 240) / 2 + CGFloat(i) * 80, y: 34, width: 80, height: 84)
         }
-        batterySurface.frame = NSRect(x: 8, y: 124, width: 240, height: 132)
-        terminalSurface.frame = NSRect(x: 8, y: 264, width: 240, height: expanded ? 192 : 30)
+        batterySurface.frame = NSRect(x: 8, y: 124, width: bounds.width - 16, height: 132)
+        terminalSurface.frame = NSRect(x: 8, y: 264, width: bounds.width - 16, height: max(30, bounds.height - 272))
         battery.frame = batterySurface.bounds
         terminal.frame = terminalSurface.bounds
     }

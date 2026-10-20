@@ -26,9 +26,9 @@ final class UIChecks {
                 app.preferences.apply(); app.dashboard.applyTheme()
                 await wait(0.3)
                 try screenshot("glass-collapsed.png")
-                let dog = NSImage(size: NSSize(width: 104, height: 20), flipped: false) { _ in
+                let dog = NSImage(size: NSSize(width: 104, height: 22), flipped: false) { _ in
                     for (index, frame) in Pet.frames.enumerated() {
-                        frame.draw(in: NSRect(x: index * 26, y: 0, width: 26, height: 20))
+                        frame.draw(in: NSRect(x: index * 26, y: 0, width: 26, height: 22))
                     }
                     return true
                 }
@@ -49,12 +49,21 @@ final class UIChecks {
                 if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                     app.preferences.animation = true; app.preferences.displayMode = .pet; app.updateStatus()
                     let initialFrame = app.frameIndex
-                    await wait(1 / app.animationFPS + 0.05)
-                    check("menu_bar_dog_animates", app.frameIndex != initialFrame)
+                    await wait(1.1)
+                    check("menu_bar_dog_animates", app.frameIndex > initialFrame)
                 } else { check("reduce_motion_stops_animation", app.animationFPS == 0) }
                 let collapsedTop = app.dashboard.window?.frame.maxY
                 submit("printf '\\033[32mMENUPUP_OK\\033[0m\\n'; export MENUPUP_SESSION=present; cd /tmp; pwd")
+                await wait(0.07)
+                if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                    check("resize_has_intermediate_frame", app.dashboard.bounds.width > 256 && app.dashboard.bounds.width < 520)
+                }
                 await wait(2)
+                check("expanded_width_520", abs(app.dashboard.bounds.width - 520) < 1)
+                check("terminal_uses_expanded_width", app.dashboard.terminal.bounds.width > 500)
+                if let frame = app.dashboard.window?.frame, let screen = app.dashboard.window?.screen {
+                    check("expanded_window_on_screen", frame.minX >= screen.frame.minX && frame.maxX <= screen.frame.maxX)
+                }
                 check("terminal_expands_on_enter", app.dashboard.terminal.expanded && app.popover.contentSize.height > 302)
                 check("terminal_expands_downward", abs((app.dashboard.window?.frame.maxY ?? 0) - (collapsedTop ?? 0)) < 2)
                 let terminal = app.dashboard.terminal.terminal
@@ -87,15 +96,34 @@ final class UIChecks {
                 check("background_child_stopped", childPID > 1 && kill(childPID, 0) != 0)
                 app.statusItem.button?.performClick(nil)
                 await wait(0.4)
+                check("reopen_compact_size", abs(app.dashboard.bounds.width - 256) < 1 && abs(app.dashboard.bounds.height - 302) < 1)
                 check("reopen_collapsed", !app.dashboard.terminal.expanded && app.dashboard.terminal.input.stringValue.isEmpty)
                 submit("printf 'FRESH:%s\\n' \"${MENUPUP_SESSION-unset}\"; pwd")
-                await wait(1)
+                let freshDeadline = ProcessInfo.processInfo.systemUptime + 4
+                while app.dashboard.terminal.terminal?.transcript.contains("\r\nFRESH:unset\r\n") != true &&
+                        ProcessInfo.processInfo.systemUptime < freshDeadline { await wait(0.05) }
                 let fresh = app.dashboard.terminal.terminal
+                try (fresh?.transcript ?? "NO TERMINAL").write(to: directory.appendingPathComponent("fresh-check.txt"), atomically: true, encoding: .utf8)
                 check("fresh_shell", fresh?.process.shellPid != firstPID &&
                       fresh?.transcript.contains("\r\nFRESH:unset\r\n") == true)
                 check("fresh_working_directory", fresh?.transcript.contains("\r\n\(FileManager.default.homeDirectoryForCurrentUser.path)\r\n") == true)
                 app.popover.performClose(nil)
                 await wait(0.8)
+                app.statusItem.button?.performClick(nil)
+                await wait(0.3)
+                submit("printf 'LATE_COMMAND\\n'")
+                let cancelledTerminal = app.dashboard.terminal.terminal
+                await wait(0.04)
+                app.popover.performClose(nil)
+                await wait(0.6)
+                check("close_cancels_initial_command", cancelledTerminal?.pendingCommand == nil &&
+                      cancelledTerminal?.transcript.contains("\r\nLATE_COMMAND\r\n") == false)
+                app.statusItem.button?.performClick(nil)
+                await wait(0.3)
+                check("close_during_resize_stays_compact", abs(app.dashboard.bounds.width - 256) < 1 &&
+                      abs(app.dashboard.bounds.height - 302) < 1 && app.dashboard.terminal.terminal == nil)
+                app.popover.performClose(nil)
+                await wait(0.4)
                 let item = NSMenuItem()
                 item.tag = DisplayMode.monitor.rawValue; app.changeDisplay(item)
                 check("monitor_mode", app.statusItem.button?.image == nil && app.statusItem.button?.title.contains(" G") == true)

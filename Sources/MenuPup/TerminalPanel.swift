@@ -7,12 +7,16 @@ final class SessionTerminal: LocalProcessTerminalView {
     var transcript = ""
     var ended: (() -> Void)?
     var pendingCommand: String?
+    var allowsInitialCommand = false
     static let readyMarker = "\u{1b}]133;A\u{7}"
     override func dataReceived(slice: ArraySlice<UInt8>) {
         transcript += String(decoding: slice, as: UTF8.self)
         if transcript.utf8.count > 32768 { transcript = String(transcript.suffix(16000)) }
         super.dataReceived(slice: slice)
-        if transcript.contains(Self.readyMarker), let command = pendingCommand {
+        sendInitialCommandIfReady()
+    }
+    func sendInitialCommandIfReady() {
+        if allowsInitialCommand, transcript.contains(Self.readyMarker), let command = pendingCommand {
             pendingCommand = nil
             send(txt: command + "\r")
         }
@@ -31,6 +35,7 @@ final class TerminalPanel: FlippedView, NSTextFieldDelegate {
     private(set) var expanded = false
     var dark = true { didSet { applyColors() } }
     private var ending = false
+    private var expansionReady = true
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -63,13 +68,14 @@ final class TerminalPanel: FlippedView, NSTextFieldDelegate {
     @objc func submit() {
         let command = input.stringValue
         guard !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, terminal == nil else { return }
-        ending = false; expanded = true
+        ending = false; expanded = true; expansionReady = false
         input.isHidden = true; enter.isHidden = true
         expandedChanged?(true)
         layoutSubtreeIfNeeded()
         let term = SessionTerminal(frame: bounds.insetBy(dx: 5, dy: 5))
         term.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
         terminal = term
+        term.allowsInitialCommand = expansionReady
         addSubview(term)
         applyColors()
         term.ended = { [weak self, weak term] in
@@ -87,9 +93,14 @@ final class TerminalPanel: FlippedView, NSTextFieldDelegate {
         term.startProcess(executable: "/bin/zsh", args: ["-f", "-i"],
                           environment: environment.map { "\($0.key)=\($0.value)" },
                           currentDirectory: FileManager.default.homeDirectoryForCurrentUser.path)
-        // Send only after zsh has produced its first prompt, avoiding a duplicate TTY echo.
+        // Wait for the first prompt AND final window size, avoiding resize-time readline redraws.
         window?.makeFirstResponder(term)
         needsDisplay = true
+    }
+    func expansionDidFinish() {
+        expansionReady = true
+        terminal?.allowsInitialCommand = true
+        terminal?.sendInitialCommandIfReady()
     }
     func applyColors() {
         terminal?.nativeBackgroundColor = dark ? NSColor(calibratedWhite: 0.10, alpha: 1) : NSColor(calibratedWhite: 0.98, alpha: 1)
@@ -99,6 +110,7 @@ final class TerminalPanel: FlippedView, NSTextFieldDelegate {
         ending = true
         if let term = terminal {
             term.ended = nil
+            term.pendingCommand = nil
             let pid = term.process.shellPid
             if term.process.running, pid > 1 {
                 mp_signal_session(pid, SIGHUP)
