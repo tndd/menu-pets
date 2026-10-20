@@ -178,6 +178,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
         statusItem.button?.image = statusFrames[frameIndex % statusFrames.count]
         statusItem.button?.title = ""
+        statusItem.length = mode == .pet ? NSStatusItem.variableLength : statusFrames[0].size.width + 4
         let summary = MenuReadout.summary(latest)
         statusItem.button?.toolTip = "MenuPup · \(summary)\nクリックで表示、右クリックで設定"
         statusItem.button?.setAccessibilityLabel("MenuPup · " + summary)

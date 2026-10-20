@@ -21,7 +21,7 @@ enum MenuReadout {
             NSGraphicsContext.saveGraphicsState()
             defer { NSGraphicsContext.restoreGraphicsState() }
             let foreground: NSColor = dark ? .white : .black
-            for (index, entry) in zip(["CPU", "GPU", "MEM"], values).enumerated() {
+            for (index, entry) in zip(["CPU", "GPU", "RAM"], values).enumerated() {
                 let x = CGFloat(index) * pairWidth
                 let track = NSRect(x: x + 1, y: 3, width: 3, height: 16)
                 foreground.withAlphaComponent(0.18).setFill()
@@ -32,11 +32,11 @@ enum MenuReadout {
                         width: track.width, height: max(1, track.height * min(1, max(0, value)))),
                         xRadius: 1.5, yRadius: 1.5).fill()
                 }
-                drawText(entry.0, NSRect(x: x + 8, y: 13, width: 29, height: 9),
+                drawText(entry.0, NSRect(x: x + 8, y: 13, width: 30, height: 9),
                          size: 6.5, color: foreground.withAlphaComponent(0.75), weight: .medium)
                 drawText(entry.1.map { String(format: "%.0f%%", $0 * 100) } ?? "—",
-                         NSRect(x: x + 8, y: 0, width: 29, height: 14),
-                         size: 10, color: foreground, weight: .medium, mono: true)
+                         NSRect(x: x + 8, y: 0, width: 30, height: 14),
+                         size: 10, color: foreground, weight: .medium, align: .right, mono: true)
             }
             return true
         }
